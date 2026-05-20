@@ -27,7 +27,7 @@ async function runScan({ universe, criteria, matchMode, minChangePct, minScore, 
 
     const stock = universe[i];
 
-    if (onProgress) onProgress({ current: i + 1, total: universe.length, evaluated, noData, filtered, found: signals.length });
+    if (onProgress) onProgress({ current: i + 1, total: universe.length, evaluated, noData, filtered, found: signals.length, partialSignals: signals });
 
     const [candles, marketCap] = await Promise.all([
       fetchCandles(stock.symbol, apiKey),

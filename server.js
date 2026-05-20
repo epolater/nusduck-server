@@ -50,23 +50,23 @@ async function ensureUniverse(deviceId) {
   return device.universe?.stocks ?? [];
 }
 
-// ── Stop flags ─────────────────────────────────────────────────────
-const stopFlags = {};   // deviceId → true when stop requested
-const scanningNow = {}; // deviceId → true while scan is running
+// ── Scan state tracking ────────────────────────────────────────────
+const stopFlags = {};    // deviceId → true when stop requested
+const scanProgress = {}; // deviceId → { scanning, progress, total, evaluated, noData, filtered, signals }
 
 // ── Scan logic ─────────────────────────────────────────────────────
 async function scanForDevice(deviceId) {
   const device = store[deviceId];
   if (!device?.pushToken || !device?.apiKey) return;
 
-  if (scanningNow[deviceId]) {
+  if (scanProgress[deviceId]?.scanning) {
     console.log(`[${deviceId}] Scan already running, skipping.`);
     return;
   }
 
   console.log(`[${deviceId}] Starting scan...`);
   stopFlags[deviceId] = false;
-  scanningNow[deviceId] = true;
+  scanProgress[deviceId] = { scanning: true, progress: 0, total: 0, evaluated: 0, noData: 0, filtered: 0, signals: [] };
 
   await sendPushNotification(device.pushToken, {
     title: '📊 Nasduck — Scan started',
@@ -84,7 +84,6 @@ async function scanForDevice(deviceId) {
     return;
   }
 
-  let lastProgress = 0;
   let scanResult;
   try {
     scanResult = await runScan({
@@ -95,16 +94,23 @@ async function scanForDevice(deviceId) {
       minScore: device.minScore ?? 1,
       apiKey: device.apiKey,
       shouldStop: () => !!stopFlags[deviceId],
-      onProgress: ({ current, total, found }) => {
-        const pct = Math.floor((current / total) * 100);
-        if (pct - lastProgress >= 25) {
-          lastProgress = pct;
-          console.log(`[${deviceId}] Progress: ${pct}% (${found} signals so far)`);
+      onProgress: ({ current, total, evaluated, noData, filtered, partialSignals }) => {
+        scanProgress[deviceId] = {
+          scanning: true,
+          progress: current,
+          total,
+          evaluated,
+          noData,
+          filtered,
+          signals: partialSignals ?? [],
+        };
+        if (current % 50 === 0) {
+          console.log(`[${deviceId}] Progress: ${current}/${total} (${partialSignals?.length ?? 0} signals)`);
         }
       },
     });
   } finally {
-    scanningNow[deviceId] = false;
+    if (scanProgress[deviceId]) scanProgress[deviceId].scanning = false;
   }
 
   const wasStopped = stopFlags[deviceId];
@@ -210,17 +216,18 @@ app.post('/scan/:deviceId', async (req, res) => {
 app.post('/stop/:deviceId', (req, res) => {
   const { deviceId } = req.params;
   if (!store[deviceId]) return res.status(404).json({ error: 'Device not registered' });
-  if (!scanningNow[deviceId]) return res.json({ ok: true, message: 'No scan running' });
+  if (!scanProgress[deviceId]?.scanning) return res.json({ ok: true, message: 'No scan running' });
   stopFlags[deviceId] = true;
   console.log(`[${deviceId}] Stop requested.`);
   res.json({ ok: true, message: 'Stop signal sent' });
 });
 
-// Scan status
+// Scan status + live progress (polled by app)
 app.get('/status/:deviceId', (req, res) => {
   const { deviceId } = req.params;
   if (!store[deviceId]) return res.status(404).json({ error: 'Device not registered' });
-  res.json({ scanning: !!scanningNow[deviceId] });
+  const p = scanProgress[deviceId] ?? { scanning: false, progress: 0, total: 0, evaluated: 0, noData: 0, filtered: 0, signals: [] };
+  res.json(p);
 });
 
 // Get last scan results
