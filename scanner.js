@@ -11,7 +11,7 @@ const CRITERIA_WEIGHTS = {
   obv_trend_up: 2, obv_trend_down: 2, inside_bar: 1,
 };
 
-async function runScan({ universe, criteria, matchMode, minChangePct, minScore, apiKey, onProgress }) {
+async function runScan({ universe, criteria, matchMode, minChangePct, minScore, apiKey, onProgress, shouldStop }) {
   const buyCriteria = criteria.filter(c => c.enabled && c.signal === 'buy');
   const marketCapCriteria = buyCriteria.find(c => c.id === 'min_market_cap');
   const regularBuyCriteria = buyCriteria.filter(c => c.id !== 'min_market_cap');
@@ -20,6 +20,11 @@ async function runScan({ universe, criteria, matchMode, minChangePct, minScore, 
   let evaluated = 0, noData = 0, filtered = 0;
 
   for (let i = 0; i < universe.length; i++) {
+    if (shouldStop && shouldStop()) {
+      console.log('Scan stopped by user request.');
+      break;
+    }
+
     const stock = universe[i];
 
     if (onProgress) onProgress({ current: i + 1, total: universe.length, evaluated, noData, filtered, found: signals.length });
