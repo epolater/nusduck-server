@@ -57,7 +57,7 @@ const stopFlags = {};    // deviceId → true when stop requested
 const scanProgress = {}; // deviceId → { scanning, progress, total, evaluated, noData, filtered, signals }
 
 // ── Scan logic ─────────────────────────────────────────────────────
-async function scanForDevice(deviceId) {
+async function scanForDevice(deviceId, fromIndex = 0, existingSignals = []) {
   const device = store[deviceId];
   if (!device?.pushToken || !device?.apiKey) return;
 
@@ -68,7 +68,7 @@ async function scanForDevice(deviceId) {
 
   console.log(`[${deviceId}] Starting scan...`);
   stopFlags[deviceId] = false;
-  scanProgress[deviceId] = { scanning: true, progress: 0, total: 0, evaluated: 0, noData: 0, filtered: 0, signals: [], phase: 'starting' };
+  scanProgress[deviceId] = { scanning: true, progress: fromIndex, total: 0, evaluated: 0, noData: 0, filtered: 0, signals: [...existingSignals], phase: fromIndex > 0 ? 'scanning' : 'starting' };
 
   await sendPushNotification(device.pushToken, {
     title: '📊 Nasduck — Scan started',
@@ -96,6 +96,8 @@ async function scanForDevice(deviceId) {
       minChangePct: device.minChangePct ?? 1,
       minScore: device.minScore ?? 1,
       apiKey: device.apiKey,
+      fromIndex,
+      existingSignals,
       shouldStop: () => !!stopFlags[deviceId],
       onProgress: ({ current, total, evaluated, noData, filtered, partialSignals }) => {
         scanProgress[deviceId] = {
@@ -120,17 +122,26 @@ async function scanForDevice(deviceId) {
   const wasStopped = stopFlags[deviceId];
   stopFlags[deviceId] = false;
 
-  if (wasStopped) {
-    console.log(`[${deviceId}] Scan stopped by user.`);
+  const { signals, evaluated, noData, filtered, stopIndex } = scanResult;
+
+  if (wasStopped && stopIndex != null) {
+    // Save resume state so app can continue later
+    device.resumeIndex = stopIndex;
+    device.resumeSignals = signals;
+    store[deviceId] = device;
+    try { saveStore(store); } catch (_) {}
+    console.log(`[${deviceId}] Scan stopped at ${stopIndex}/${universe.length}. ${signals.length} signals so far.`);
     await sendPushNotification(device.pushToken, {
       title: '⏹ Nasduck — Scan stopped',
-      body: 'Scan was stopped before completion.',
+      body: `Stopped at ${stopIndex}/${universe.length}. Tap to continue.`,
       data: { screen: 'signals' },
     });
     return;
   }
 
-  const { signals, evaluated, noData, filtered } = scanResult;
+  // Scan completed — clear resume state
+  device.resumeIndex = null;
+  device.resumeSignals = [];
 
   device.lastScanAt = Date.now();
   device.lastSignals = signals;
@@ -229,12 +240,19 @@ app.post('/register', (req, res) => {
   }
 });
 
-// Trigger scan manually
+// Trigger scan manually (fromIndex=0 = fresh, fromIndex>0 = continue)
 app.post('/scan/:deviceId', async (req, res) => {
   const { deviceId } = req.params;
-  if (!store[deviceId]) return res.status(404).json({ error: 'Device not registered' });
-  res.json({ ok: true, message: 'Scan started — you will get a push notification when done' });
-  scanForDevice(deviceId).catch(console.error);
+  const device = store[deviceId];
+  if (!device) return res.status(404).json({ error: 'Device not registered' });
+  if (scanProgress[deviceId]?.scanning) return res.json({ ok: true, message: 'Scan already running' });
+
+  const fresh = req.body?.fresh === true;
+  const fromIndex = (!fresh && device.resumeIndex) ? device.resumeIndex : 0;
+  const existingSignals = (!fresh && device.resumeSignals?.length) ? device.resumeSignals : [];
+
+  res.json({ ok: true, message: fromIndex > 0 ? `Continuing from ${fromIndex}` : 'Scan started', resumeIndex: fromIndex, total: device.universe?.stocks?.length ?? 0 });
+  scanForDevice(deviceId, fromIndex, existingSignals).catch(console.error);
 });
 
 // Stop a running scan
@@ -257,6 +275,8 @@ app.get('/status/:deviceId', (req, res) => {
     ...p,
     lastScanAt: device.lastScanAt ?? null,
     lastSignals: p.scanning ? [] : (device.lastSignals ?? []),
+    resumeIndex: device.resumeIndex ?? null,
+    universeTotal: device.universe?.stocks?.length ?? 0,
   });
 });
 
