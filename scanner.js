@@ -1,5 +1,6 @@
 const { fetchCandles, fetchMarketCap, delay, RATE_LIMIT_MS } = require('./finnhub');
 const { evaluateCriteria, meetsUniverseFilter } = require('./analysis');
+const { fetchOptionsData } = require('./tradier');
 
 const CRITERIA_WEIGHTS = {
   trending_up: 2, trending_down: 2, rsi_oversold: 3, rsi_overbought: 3,
@@ -9,9 +10,10 @@ const CRITERIA_WEIGHTS = {
   bollinger_breakout_down: 3, gap_up: 3, gap_down: 3, stoch_oversold: 3,
   stoch_overbought: 3, adx_strong: 2, atr_spike: 2, volume_dryup: 1,
   obv_trend_up: 2, obv_trend_down: 2, inside_bar: 1,
+  put_call_ratio_low: 3, put_call_ratio_high: 3, high_iv: 2, near_max_pain: 2,
 };
 
-async function runScan({ universe, criteria, matchMode, minChangePct, minScore, apiKey, onProgress, shouldStop, fromIndex = 0, existingSignals = [] }) {
+async function runScan({ universe, criteria, matchMode, minChangePct, minScore, apiKey, tradierKey, onProgress, shouldStop, fromIndex = 0, existingSignals = [] }) {
   const buyCriteria = criteria.filter(c => c.enabled && c.signal === 'buy');
   const marketCapCriteria = buyCriteria.find(c => c.id === 'min_market_cap');
   const regularBuyCriteria = buyCriteria.filter(c => c.id !== 'min_market_cap');
@@ -84,7 +86,7 @@ async function runScan({ universe, criteria, matchMode, minChangePct, minScore, 
 
     const matchedCriteria = matchedBuy.map(r => `${r.c.name}: ${r.result.detail}`);
 
-    const score = Math.round(matchedBuy.reduce((sum, r) => {
+    let score = Math.round(matchedBuy.reduce((sum, r) => {
       const baseWeight = CRITERIA_WEIGHTS[r.c.id] ?? 1;
       if ((r.c.id === 'trending_up' || r.c.id === 'trending_down') && r.result?.value != null) {
         const absPct = Math.abs(r.result.value);
@@ -99,6 +101,30 @@ async function runScan({ universe, criteria, matchMode, minChangePct, minScore, 
       continue;
     }
 
+    // Enrich with options data if Tradier key provided
+    let optionsData = null;
+    if (tradierKey) {
+      try {
+        optionsData = await fetchOptionsData(stock.symbol, tradierKey);
+        const optionsCriteriaIds = ['put_call_ratio_low', 'put_call_ratio_high', 'high_iv', 'near_max_pain'];
+        const optionsCriteria = criteria.filter(c => c.enabled && optionsCriteriaIds.includes(c.id));
+        for (const c of optionsCriteria) {
+          let matched = false, detail = '';
+          if (c.id === 'put_call_ratio_low' && optionsData.pcr != null) {
+            matched = optionsData.pcr < 0.7; detail = `PCR: ${optionsData.pcr.toFixed(2)}`;
+          } else if (c.id === 'put_call_ratio_high' && optionsData.pcr != null) {
+            matched = optionsData.pcr > 1.0; detail = `PCR: ${optionsData.pcr.toFixed(2)}`;
+          } else if (c.id === 'high_iv' && optionsData.ivAvg != null) {
+            matched = optionsData.ivAvg > 0.4; detail = `IV: ${(optionsData.ivAvg * 100).toFixed(1)}%`;
+          } else if (c.id === 'near_max_pain' && optionsData.maxPain != null) {
+            matched = Math.abs(currentPrice - optionsData.maxPain) / optionsData.maxPain < 0.03;
+            detail = `MaxPain: $${optionsData.maxPain.toFixed(2)}`;
+          }
+          if (matched) { matchedCriteria.push(`${c.name}: ${detail}`); score += CRITERIA_WEIGHTS[c.id] ?? 1; }
+        }
+      } catch (_) {}
+    }
+
     signals.push({
       symbol: stock.symbol,
       name: stock.name,
@@ -108,6 +134,7 @@ async function runScan({ universe, criteria, matchMode, minChangePct, minScore, 
       price: currentPrice,
       changePercent,
       generatedAt: Date.now(),
+      optionsData,
     });
 
     await delay(RATE_LIMIT_MS);
