@@ -13,10 +13,10 @@ const CRITERIA_WEIGHTS = {
   put_call_ratio_low: 3, put_call_ratio_high: 3, high_iv: 2, near_max_pain: 2,
 };
 
-async function runScan({ universe, criteria, matchMode, minChangePct, minScore, apiKey, onProgress, shouldStop, fromIndex = 0, existingSignals = [] }) {
+async function runScan({ universe, criteria, matchMode, minChangePct, minScore, minMarketCap, apiKey, onProgress, shouldStop, fromIndex = 0, existingSignals = [] }) {
   const buyCriteria = criteria.filter(c => c.enabled && c.signal === 'buy');
-  const marketCapCriteria = buyCriteria.find(c => c.id === 'min_market_cap');
-  const regularBuyCriteria = buyCriteria.filter(c => c.id !== 'min_market_cap');
+  const regularBuyCriteria = buyCriteria;
+  const marketCapFilterEnabled = minMarketCap > 0;
 
   const signals = [...existingSignals];
   let evaluated = 0, noData = 0, filtered = 0;
@@ -33,7 +33,7 @@ async function runScan({ universe, criteria, matchMode, minChangePct, minScore, 
 
     const [candles, marketCap] = await Promise.all([
       fetchCandles(stock.symbol, apiKey),
-      marketCapCriteria ? fetchMarketCap(stock.symbol, apiKey) : Promise.resolve(null),
+      marketCapFilterEnabled ? fetchMarketCap(stock.symbol, apiKey) : Promise.resolve(null),
     ]);
 
     if (!candles || candles.close.length < 20) {
@@ -49,8 +49,8 @@ async function runScan({ universe, criteria, matchMode, minChangePct, minScore, 
     }
 
     // Hard filter: market cap
-    if (marketCapCriteria) {
-      const minCap = marketCapCriteria.threshold * 1_000_000_000;
+    if (marketCapFilterEnabled) {
+      const minCap = minMarketCap * 1_000_000_000;
       if (!marketCap || marketCap < minCap) {
         filtered++;
         await delay(RATE_LIMIT_MS);
