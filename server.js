@@ -31,20 +31,22 @@ async function ensureUniverse(deviceId) {
   const device = store[deviceId];
   if (!device?.apiKey) return [];
 
-  const age = device.universe?.updatedAt ? (Date.now() - device.universe.updatedAt) : Infinity;
-  const ONE_WEEK = 7 * 24 * 60 * 60 * 1000;
+  // Use locally-provided universe if available (sent from app on registration)
+  if (device.universe?.stocks?.length > 0) {
+    console.log(`[${deviceId}] Using app-provided universe: ${device.universe.stocks.length} stocks`);
+    return device.universe.stocks;
+  }
 
-  if (!device.universe?.stocks || age > ONE_WEEK) {
-    console.log(`[${deviceId}] Refreshing universe...`);
-    try {
-      const stocks = await fetchNasdaqSymbols(device.apiKey);
-      device.universe = { stocks, updatedAt: Date.now() };
-      store[deviceId] = device;
-      saveStore(store);
-      console.log(`[${deviceId}] Universe: ${stocks.length} stocks`);
-    } catch (e) {
-      console.error(`[${deviceId}] Universe fetch failed:`, e.message);
-    }
+  // Fallback: fetch from Finnhub if app didn't send universe
+  console.log(`[${deviceId}] No universe from app, fetching from Finnhub...`);
+  try {
+    const stocks = await fetchNasdaqSymbols(device.apiKey);
+    device.universe = { stocks, updatedAt: Date.now() };
+    store[deviceId] = device;
+    saveStore(store);
+    console.log(`[${deviceId}] Universe fetched: ${stocks.length} stocks`);
+  } catch (e) {
+    console.error(`[${deviceId}] Universe fetch failed:`, e.message);
   }
 
   return device.universe?.stocks ?? [];
@@ -184,7 +186,7 @@ Object.keys(store).forEach(scheduleDevice);
 
 // Phone registers itself + sends config
 app.post('/register', (req, res) => {
-  const { deviceId, pushToken, apiKey, criteria, matchMode, minChangePct, minScore, scanHour, scanMinute } = req.body;
+  const { deviceId, pushToken, apiKey, criteria, matchMode, minChangePct, minScore, scanHour, scanMinute, universe } = req.body;
   if (!deviceId || !pushToken || !apiKey) return res.status(400).json({ error: 'deviceId, pushToken and apiKey required' });
 
   const existing = store[deviceId] ?? {};
@@ -198,6 +200,10 @@ app.post('/register', (req, res) => {
     minScore: minScore ?? existing.minScore ?? 1,
     scanHour: scanHour ?? existing.scanHour ?? 18,
     scanMinute: scanMinute ?? existing.scanMinute ?? 0,
+    // Use app-provided universe if sent, keep existing otherwise
+    universe: universe?.length > 0
+      ? { stocks: universe, updatedAt: Date.now() }
+      : existing.universe,
   };
   saveStore(store);
   scheduleDevice(deviceId);
