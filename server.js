@@ -7,7 +7,7 @@ const { runScan } = require('./scanner');
 const { sendPushNotification } = require('./push');
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
 
 const STORE_PATH = path.join(__dirname, 'store.json');
 
@@ -201,8 +201,9 @@ app.post('/register', (req, res) => {
     scanHour: scanHour ?? existing.scanHour ?? 18,
     scanMinute: scanMinute ?? existing.scanMinute ?? 0,
     // Use app-provided universe if sent, keep existing otherwise
+    // Accept either [{symbol,name}] objects or plain ['AAPL','MSFT'] strings
     universe: universe?.length > 0
-      ? { stocks: universe, updatedAt: Date.now() }
+      ? { stocks: universe.map(s => typeof s === 'string' ? { symbol: s, name: s } : s), updatedAt: Date.now() }
       : existing.universe,
   };
   saveStore(store);
