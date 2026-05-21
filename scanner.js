@@ -1,6 +1,6 @@
 const { fetchCandles, fetchMarketCap, delay, RATE_LIMIT_MS } = require('./finnhub');
 const { evaluateCriteria, meetsUniverseFilter } = require('./analysis');
-const { fetchOptionsData } = require('./tradier');
+const { fetchOptionsData } = require('./options');
 
 const CRITERIA_WEIGHTS = {
   trending_up: 2, trending_down: 2, rsi_oversold: 3, rsi_overbought: 3,
@@ -13,7 +13,7 @@ const CRITERIA_WEIGHTS = {
   put_call_ratio_low: 3, put_call_ratio_high: 3, high_iv: 2, near_max_pain: 2,
 };
 
-async function runScan({ universe, criteria, matchMode, minChangePct, minScore, apiKey, tradierKey, onProgress, shouldStop, fromIndex = 0, existingSignals = [] }) {
+async function runScan({ universe, criteria, matchMode, minChangePct, minScore, apiKey, onProgress, shouldStop, fromIndex = 0, existingSignals = [] }) {
   const buyCriteria = criteria.filter(c => c.enabled && c.signal === 'buy');
   const marketCapCriteria = buyCriteria.find(c => c.id === 'min_market_cap');
   const regularBuyCriteria = buyCriteria.filter(c => c.id !== 'min_market_cap');
@@ -101,29 +101,27 @@ async function runScan({ universe, criteria, matchMode, minChangePct, minScore, 
       continue;
     }
 
-    // Enrich with options data if Tradier key provided
+    // Enrich with options data via Yahoo Finance (no key required)
     let optionsData = null;
-    if (tradierKey) {
-      try {
-        optionsData = await fetchOptionsData(stock.symbol, tradierKey);
-        const optionsCriteriaIds = ['put_call_ratio_low', 'put_call_ratio_high', 'high_iv', 'near_max_pain'];
-        const optionsCriteria = criteria.filter(c => c.enabled && optionsCriteriaIds.includes(c.id));
-        for (const c of optionsCriteria) {
-          let matched = false, detail = '';
-          if (c.id === 'put_call_ratio_low' && optionsData.pcr != null) {
-            matched = optionsData.pcr < 0.7; detail = `PCR: ${optionsData.pcr.toFixed(2)}`;
-          } else if (c.id === 'put_call_ratio_high' && optionsData.pcr != null) {
-            matched = optionsData.pcr > 1.0; detail = `PCR: ${optionsData.pcr.toFixed(2)}`;
-          } else if (c.id === 'high_iv' && optionsData.ivAvg != null) {
-            matched = optionsData.ivAvg > 0.4; detail = `IV: ${(optionsData.ivAvg * 100).toFixed(1)}%`;
-          } else if (c.id === 'near_max_pain' && optionsData.maxPain != null) {
-            matched = Math.abs(currentPrice - optionsData.maxPain) / optionsData.maxPain < 0.03;
-            detail = `MaxPain: $${optionsData.maxPain.toFixed(2)}`;
-          }
-          if (matched) { matchedCriteria.push(`${c.name}: ${detail}`); score += CRITERIA_WEIGHTS[c.id] ?? 1; }
+    try {
+      optionsData = await fetchOptionsData(stock.symbol);
+      const optionsCriteriaIds = ['put_call_ratio_low', 'put_call_ratio_high', 'high_iv', 'near_max_pain'];
+      const optionsCriteria = criteria.filter(c => c.enabled && optionsCriteriaIds.includes(c.id));
+      for (const c of optionsCriteria) {
+        let matched = false, detail = '';
+        if (c.id === 'put_call_ratio_low' && optionsData.pcr != null) {
+          matched = optionsData.pcr < 0.7; detail = `PCR: ${optionsData.pcr.toFixed(2)}`;
+        } else if (c.id === 'put_call_ratio_high' && optionsData.pcr != null) {
+          matched = optionsData.pcr > 1.0; detail = `PCR: ${optionsData.pcr.toFixed(2)}`;
+        } else if (c.id === 'high_iv' && optionsData.ivAvg != null) {
+          matched = optionsData.ivAvg > 0.4; detail = `IV: ${(optionsData.ivAvg * 100).toFixed(1)}%`;
+        } else if (c.id === 'near_max_pain' && optionsData.maxPain != null) {
+          matched = Math.abs(currentPrice - optionsData.maxPain) / optionsData.maxPain < 0.03;
+          detail = `MaxPain: $${optionsData.maxPain.toFixed(2)}`;
         }
-      } catch (_) {}
-    }
+        if (matched) { matchedCriteria.push(`${c.name}: ${detail}`); score += CRITERIA_WEIGHTS[c.id] ?? 1; }
+      }
+    } catch (_) {}
 
     signals.push({
       symbol: stock.symbol,

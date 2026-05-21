@@ -90,7 +90,6 @@ async function scanForDevice(deviceId, fromIndex = 0, existingSignals = []) {
       minChangePct: device.minChangePct ?? 1,
       minScore: device.minScore ?? 1,
       apiKey: device.apiKey,
-      tradierKey: device.tradierKey ?? null,
       fromIndex,
       existingSignals,
       shouldStop: () => !!stopFlags[deviceId],
@@ -188,7 +187,7 @@ Object.keys(store).forEach(scheduleDevice);
 // Phone registers itself + sends config
 app.post('/register', (req, res) => {
   try {
-    const { deviceId, pushToken, apiKey, criteria, matchMode, minChangePct, minScore, scanHour, scanMinute, universe, tradierKey } = req.body;
+    const { deviceId, pushToken, apiKey, criteria, matchMode, minChangePct, minScore, scanHour, scanMinute, universe } = req.body;
     if (!deviceId || !pushToken || !apiKey) return res.status(400).json({ error: 'deviceId, pushToken and apiKey required' });
 
     const existing = store[deviceId] ?? {};
@@ -212,7 +211,6 @@ app.post('/register', (req, res) => {
       scanHour: scanHour ?? existing.scanHour ?? 18,
       scanMinute: scanMinute ?? existing.scanMinute ?? 0,
       universe: parsedUniverse,
-      tradierKey: tradierKey ?? existing.tradierKey ?? null,
     };
 
     try {
