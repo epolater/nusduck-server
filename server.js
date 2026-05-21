@@ -168,7 +168,7 @@ function scheduleDevice(deviceId) {
   const minute = device.scanMinute ?? 0;
 
   if (scheduledJobs[deviceId]) {
-    scheduledJobs[deviceId].destroy();
+    scheduledJobs[deviceId].stop();
   }
 
   const cronExpr = `${minute} ${hour} * * 1-5`; // weekdays only
