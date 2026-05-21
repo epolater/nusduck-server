@@ -224,19 +224,17 @@ app.post('/stop/:deviceId', (req, res) => {
   res.json({ ok: true, message: 'Stop signal sent' });
 });
 
-// Scan status + live progress (polled by app)
+// Full device status: scan progress + last results + last scan date
 app.get('/status/:deviceId', (req, res) => {
   const { deviceId } = req.params;
-  if (!store[deviceId]) return res.status(404).json({ error: 'Device not registered' });
-  const p = scanProgress[deviceId] ?? { scanning: false, progress: 0, total: 0, evaluated: 0, noData: 0, filtered: 0, signals: [] };
-  res.json(p);
-});
-
-// Get last scan results
-app.get('/signals/:deviceId', (req, res) => {
-  const device = store[req.params.deviceId];
-  if (!device) return res.status(404).json({ error: 'Not found' });
-  res.json({ signals: device.lastSignals ?? [], lastScanAt: device.lastScanAt ?? null });
+  const device = store[deviceId];
+  if (!device) return res.status(404).json({ error: 'Device not registered' });
+  const p = scanProgress[deviceId] ?? { scanning: false, phase: 'idle', progress: 0, total: 0, evaluated: 0, noData: 0, filtered: 0, signals: [] };
+  res.json({
+    ...p,
+    lastScanAt: device.lastScanAt ?? null,
+    lastSignals: p.scanning ? [] : (device.lastSignals ?? []),
+  });
 });
 
 // Health check
