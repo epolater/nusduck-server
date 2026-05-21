@@ -70,12 +70,6 @@ async function scanForDevice(deviceId, fromIndex = 0, existingSignals = []) {
   stopFlags[deviceId] = false;
   scanProgress[deviceId] = { scanning: true, progress: fromIndex, total: 0, evaluated: 0, noData: 0, filtered: 0, signals: [...existingSignals], phase: fromIndex > 0 ? 'scanning' : 'starting' };
 
-  await sendPushNotification(device.pushToken, {
-    title: '📊 Nasduck — Scan started',
-    body: 'Scanning NASDAQ for signals. You will be notified when done.',
-    data: { screen: 'signals' },
-  });
-
   scanProgress[deviceId].phase = 'loading_universe';
   const universe = await ensureUniverse(deviceId);
   if (!universe.length) {
@@ -131,11 +125,6 @@ async function scanForDevice(deviceId, fromIndex = 0, existingSignals = []) {
     store[deviceId] = device;
     try { saveStore(store); } catch (_) {}
     console.log(`[${deviceId}] Scan stopped at ${stopIndex}/${universe.length}. ${signals.length} signals so far.`);
-    await sendPushNotification(device.pushToken, {
-      title: '⏹ Nasduck — Scan stopped',
-      body: `Stopped at ${stopIndex}/${universe.length}. Tap to continue.`,
-      data: { screen: 'signals' },
-    });
     return;
   }
 
