@@ -186,31 +186,47 @@ Object.keys(store).forEach(scheduleDevice);
 
 // Phone registers itself + sends config
 app.post('/register', (req, res) => {
-  const { deviceId, pushToken, apiKey, criteria, matchMode, minChangePct, minScore, scanHour, scanMinute, universe } = req.body;
-  if (!deviceId || !pushToken || !apiKey) return res.status(400).json({ error: 'deviceId, pushToken and apiKey required' });
+  try {
+    const { deviceId, pushToken, apiKey, criteria, matchMode, minChangePct, minScore, scanHour, scanMinute, universe } = req.body;
+    if (!deviceId || !pushToken || !apiKey) return res.status(400).json({ error: 'deviceId, pushToken and apiKey required' });
 
-  const existing = store[deviceId] ?? {};
-  store[deviceId] = {
-    ...existing,
-    pushToken,
-    apiKey,
-    criteria: criteria ?? existing.criteria ?? [],
-    matchMode: matchMode ?? existing.matchMode ?? 'any',
-    minChangePct: minChangePct ?? existing.minChangePct ?? 1,
-    minScore: minScore ?? existing.minScore ?? 1,
-    scanHour: scanHour ?? existing.scanHour ?? 18,
-    scanMinute: scanMinute ?? existing.scanMinute ?? 0,
-    // Use app-provided universe if sent, keep existing otherwise
+    const existing = store[deviceId] ?? {};
+
     // Accept either [{symbol,name}] objects or plain ['AAPL','MSFT'] strings
-    universe: universe?.length > 0
-      ? { stocks: universe.map(s => typeof s === 'string' ? { symbol: s, name: s } : s), updatedAt: Date.now() }
-      : existing.universe,
-  };
-  saveStore(store);
-  scheduleDevice(deviceId);
+    let parsedUniverse = existing.universe;
+    if (Array.isArray(universe) && universe.length > 0) {
+      const stocks = universe.map(s => typeof s === 'string' ? { symbol: s, name: s } : s);
+      parsedUniverse = { stocks, updatedAt: Date.now() };
+      console.log(`[${deviceId}] Received universe: ${stocks.length} stocks`);
+    }
 
-  console.log(`[${deviceId}] Registered / updated config`);
-  res.json({ ok: true, message: `Scan scheduled at ${store[deviceId].scanHour}:${String(store[deviceId].scanMinute).padStart(2,'0')} ET` });
+    store[deviceId] = {
+      ...existing,
+      pushToken,
+      apiKey,
+      criteria: criteria ?? existing.criteria ?? [],
+      matchMode: matchMode ?? existing.matchMode ?? 'any',
+      minChangePct: minChangePct ?? existing.minChangePct ?? 1,
+      minScore: minScore ?? existing.minScore ?? 1,
+      scanHour: scanHour ?? existing.scanHour ?? 18,
+      scanMinute: scanMinute ?? existing.scanMinute ?? 0,
+      universe: parsedUniverse,
+    };
+
+    try {
+      saveStore(store);
+    } catch (saveErr) {
+      console.error(`[${deviceId}] saveStore failed:`, saveErr.message);
+      // Non-fatal — continue with in-memory store
+    }
+
+    scheduleDevice(deviceId);
+    console.log(`[${deviceId}] Registered / updated config`);
+    res.json({ ok: true, message: `Scan scheduled at ${store[deviceId].scanHour}:${String(store[deviceId].scanMinute).padStart(2,'0')} ET` });
+  } catch (e) {
+    console.error('Register error:', e.message, e.stack);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Trigger scan manually
