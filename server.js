@@ -66,7 +66,7 @@ async function scanForDevice(deviceId) {
 
   console.log(`[${deviceId}] Starting scan...`);
   stopFlags[deviceId] = false;
-  scanProgress[deviceId] = { scanning: true, progress: 0, total: 0, evaluated: 0, noData: 0, filtered: 0, signals: [] };
+  scanProgress[deviceId] = { scanning: true, progress: 0, total: 0, evaluated: 0, noData: 0, filtered: 0, signals: [], phase: 'starting' };
 
   await sendPushNotification(device.pushToken, {
     title: '📊 Nasduck — Scan started',
@@ -74,6 +74,7 @@ async function scanForDevice(deviceId) {
     data: { screen: 'signals' },
   });
 
+  scanProgress[deviceId].phase = 'loading_universe';
   const universe = await ensureUniverse(deviceId);
   if (!universe.length) {
     await sendPushNotification(device.pushToken, {
@@ -97,6 +98,7 @@ async function scanForDevice(deviceId) {
       onProgress: ({ current, total, evaluated, noData, filtered, partialSignals }) => {
         scanProgress[deviceId] = {
           scanning: true,
+          phase: 'scanning',
           progress: current,
           total,
           evaluated,
