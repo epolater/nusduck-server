@@ -4,38 +4,37 @@ function nullResult() {
   return { pcr: null, maxPain: null, ivAvg: null, ivRank: null, expiryDate: null };
 }
 
-async function getNearestExpiry(symbol) {
-  const res = await axios.get(
-    `https://api.marketdata.app/v1/options/expirations/${symbol}/`,
-    { timeout: 8000 }
-  );
-  const expirations = res.data?.expirations ?? [];
-  return expirations[0] ?? null;
-}
-
+// CBOE delayed quotes — free, no API key, covers all optionable US stocks
 async function fetchOptionsData(symbol) {
   try {
-    const expiry = await getNearestExpiry(symbol);
-    if (!expiry) return nullResult();
-
     const res = await axios.get(
-      `https://api.marketdata.app/v1/options/chain/${symbol}/`,
-      { params: { expiration: expiry }, timeout: 10000 }
+      `https://cdn.cboe.com/api/global/delayed_quotes/options/${symbol}.json`,
+      { timeout: 10000 }
     );
 
-    const d = res.data;
-    if (d?.s !== 'ok' || !d.strike?.length) return nullResult();
+    const data = res.data?.data;
+    if (!data?.options?.length) return nullResult();
 
-    const sides  = d.side;
-    const strikes = d.strike;
-    const volumes = d.volume;
-    const ois    = d.openInterest;
-    const ivs    = d.iv;
-    const underlyingPrice = d.underlyingPrice?.[0] ?? 0;
-    const expiryDate = expiry;
+    const underlyingPrice = data.current_price ?? 0;
+    const iv30 = data.iv30 ?? null; // 30-day IV % (e.g. 38.3 = 38.3%)
 
-    const calls = strikes.map((s, i) => ({ strike: s, volume: volumes[i] ?? 0, oi: ois[i] ?? 0, iv: ivs[i] ?? 0 })).filter((_, i) => sides[i] === 'call');
-    const puts  = strikes.map((s, i) => ({ strike: s, volume: volumes[i] ?? 0, oi: ois[i] ?? 0, iv: ivs[i] ?? 0 })).filter((_, i) => sides[i] === 'put');
+    const calls = [];
+    const puts  = [];
+    let nearestExpiry = null;
+
+    for (const o of data.options) {
+      const m = o.option?.match(/[A-Z]+(\d{2})(\d{2})(\d{2})([CP])(\d+)/);
+      if (!m) continue;
+      const [, yy, mm, dd, side, strikeRaw] = m;
+      const expiry = `20${yy}-${mm}-${dd}`;
+      if (!nearestExpiry || expiry < nearestExpiry) nearestExpiry = expiry;
+
+      const strike = parseInt(strikeRaw) / 1000;
+      const vol = o.volume ?? 0;
+      const oi  = o.open_interest ?? 0;
+      if (side === 'C') calls.push({ strike, volume: vol, oi });
+      else              puts.push({ strike, volume: vol, oi });
+    }
 
     if (!calls.length && !puts.length) return nullResult();
 
@@ -54,17 +53,14 @@ async function fetchOptionsData(symbol) {
       if (total < minLoss) { minLoss = total; maxPain = s; }
     }
 
-    // IV Average — ATM options only (within 5% of current price)
-    const atm = [...calls, ...puts].filter(o =>
-      underlyingPrice > 0 && Math.abs(o.strike - underlyingPrice) / underlyingPrice < 0.05 && o.iv > 0
-    );
-    const ivAvg = atm.length > 0 ? atm.reduce((s, o) => s + o.iv, 0) / atm.length : null;
+    // IV: use CBOE's iv30 directly (already a %, convert to 0–1)
+    const ivAvg = iv30 != null && iv30 > 0 ? iv30 / 100 : null;
 
     const ivRank = ivAvg != null
       ? ivAvg > 0.6 ? 80 : ivAvg > 0.4 ? 60 : ivAvg > 0.25 ? 40 : 20
       : null;
 
-    return { pcr, maxPain, ivAvg, ivRank, expiryDate };
+    return { pcr, maxPain, ivAvg, ivRank, expiryDate: nearestExpiry };
   } catch (e) {
     console.error(`[options] ${symbol}: ${e.message}`);
     return nullResult();
