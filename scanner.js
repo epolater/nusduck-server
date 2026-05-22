@@ -132,6 +132,7 @@ async function runScan({ universe, criteria, matchMode, minChangePct, minScore, 
       price: currentPrice,
       changePercent,
       generatedAt: Date.now(),
+      marketCap: marketCap ?? candles.marketCap ?? null,
       optionsData,
     });
 
