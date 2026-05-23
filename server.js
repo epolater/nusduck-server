@@ -191,13 +191,13 @@ const scheduledJobs = {};
 // Called on /status and /register so the first request after wakeup catches up.
 function checkMissedScan(deviceId) {
   const device = store[deviceId];
-  if (!device?.apiKey || !device?.pushToken) return;
-  if (scanProgress[deviceId]?.scanning) return;
+  if (!device?.apiKey || !device?.pushToken) { console.log(`[${deviceId}] checkMissedScan: no apiKey/pushToken`); return; }
+  if (scanProgress[deviceId]?.scanning) { console.log(`[${deviceId}] checkMissedScan: already scanning`); return; }
 
   // Only weekdays in ET
   const etNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
   const day = etNow.getDay();
-  if (day === 0 || day === 6) return;
+  if (day === 0 || day === 6) { console.log(`[${deviceId}] checkMissedScan: weekend`); return; }
 
   const scanHour = device.scanHour ?? 18;
   const scanMinute = device.scanMinute ?? 0;
@@ -206,18 +206,20 @@ function checkMissedScan(deviceId) {
   const scheduledToday = new Date(etNow);
   scheduledToday.setHours(scanHour, scanMinute, 0, 0);
 
+  console.log(`[${deviceId}] checkMissedScan: etNow=${etNow.toTimeString().slice(0,8)} scheduled=${String(scanHour).padStart(2,'0')}:${String(scanMinute).padStart(2,'0')} lastScanAt=${device.lastScanAt ? new Date(device.lastScanAt).toTimeString().slice(0,8) : 'null'} lastStartedAt=${device.lastScanStartedAt ? new Date(device.lastScanStartedAt).toTimeString().slice(0,8) : 'null'}`);
+
   // Not yet time
-  if (etNow < scheduledToday) return;
+  if (etNow < scheduledToday) { console.log(`[${deviceId}] checkMissedScan: not yet time`); return; }
 
   // Only catch up within a 4-hour window — don't run yesterday's missed scan
   const msLate = etNow - scheduledToday;
-  if (msLate > 4 * 60 * 60 * 1000) return;
+  if (msLate > 4 * 60 * 60 * 1000) { console.log(`[${deviceId}] checkMissedScan: too late (${Math.round(msLate/3600000)}h)`); return; }
 
   // Already started today at or after scheduled time
   const lastStarted = device.lastScanStartedAt ?? device.lastScanAt;
   if (lastStarted) {
     const lastET = new Date(new Date(lastStarted).toLocaleString('en-US', { timeZone: 'America/New_York' }));
-    if (lastET >= scheduledToday) return;
+    if (lastET >= scheduledToday) { console.log(`[${deviceId}] checkMissedScan: already ran today at ${lastET.toTimeString().slice(0,8)}`); return; }
   }
 
   console.log(`[${deviceId}] Missed scheduled scan at ${String(scanHour).padStart(2,'0')}:${String(scanMinute).padStart(2,'0')} ET — starting now (${Math.round(msLate/60000)} min late)`);
