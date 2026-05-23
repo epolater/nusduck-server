@@ -195,6 +195,8 @@ function checkMissedScan(deviceId) {
   if (scanProgress[deviceId]?.scanning) { console.log(`[${deviceId}] checkMissedScan: already scanning`); return; }
 
   const etNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const day = etNow.getDay();
+  if (!device.scanWeekends && (day === 0 || day === 6)) { console.log(`[${deviceId}] checkMissedScan: weekend skipped`); return; }
 
   const scanHour = device.scanHour ?? 18;
   const scanMinute = device.scanMinute ?? 0;
@@ -234,7 +236,8 @@ function scheduleDevice(deviceId) {
     scheduledJobs[deviceId].stop();
   }
 
-  const cronExpr = `${minute} ${hour} * * *`; // every day
+  const scanWeekends = device.scanWeekends ?? false;
+  const cronExpr = `${minute} ${hour} * * ${scanWeekends ? '*' : '1-5'}`;
   scheduledJobs[deviceId] = cron.schedule(cronExpr, () => scanForDevice(deviceId), {
     timezone: 'America/New_York', // US market time
   });
@@ -267,7 +270,7 @@ try { saveStore(store); } catch (_) {}
 // Phone registers itself + sends config
 app.post('/register', (req, res) => {
   try {
-    const { deviceId, pushToken, apiKey, criteria, matchMode, minChangePct, minScore, minMarketCap, scanHour, scanMinute, universe, criteriaWeights } = req.body;
+    const { deviceId, pushToken, apiKey, criteria, matchMode, minChangePct, minScore, minMarketCap, scanHour, scanMinute, scanWeekends, universe, criteriaWeights } = req.body;
     if (!deviceId || !pushToken || !apiKey) return res.status(400).json({ error: 'deviceId, pushToken and apiKey required' });
 
     const existing = store[deviceId] ?? {};
@@ -292,6 +295,7 @@ app.post('/register', (req, res) => {
       scanHour: scanHour ?? existing.scanHour ?? 18,
       scanMinute: scanMinute ?? existing.scanMinute ?? 0,
       universe: parsedUniverse,
+      scanWeekends: scanWeekends ?? existing.scanWeekends ?? false,
       criteriaWeights: criteriaWeights ?? existing.criteriaWeights ?? null,
     };
 
