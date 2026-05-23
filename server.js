@@ -194,10 +194,7 @@ function checkMissedScan(deviceId) {
   if (!device?.apiKey || !device?.pushToken) { console.log(`[${deviceId}] checkMissedScan: no apiKey/pushToken`); return; }
   if (scanProgress[deviceId]?.scanning) { console.log(`[${deviceId}] checkMissedScan: already scanning`); return; }
 
-  // Only weekdays in ET
   const etNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
-  const day = etNow.getDay();
-  if (day === 0 || day === 6) { console.log(`[${deviceId}] checkMissedScan: weekend`); return; }
 
   const scanHour = device.scanHour ?? 18;
   const scanMinute = device.scanMinute ?? 0;
@@ -237,7 +234,7 @@ function scheduleDevice(deviceId) {
     scheduledJobs[deviceId].stop();
   }
 
-  const cronExpr = `${minute} ${hour} * * 1-5`; // weekdays only
+  const cronExpr = `${minute} ${hour} * * *`; // every day
   scheduledJobs[deviceId] = cron.schedule(cronExpr, () => scanForDevice(deviceId), {
     timezone: 'America/New_York', // US market time
   });
