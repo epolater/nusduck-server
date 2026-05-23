@@ -194,31 +194,30 @@ function checkMissedScan(deviceId) {
   if (!device?.apiKey || !device?.pushToken) { console.log(`[${deviceId}] checkMissedScan: no apiKey/pushToken`); return; }
   if (scanProgress[deviceId]?.scanning) { console.log(`[${deviceId}] checkMissedScan: already scanning`); return; }
 
-  const etNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
-  const day = etNow.getDay();
+  const now = new Date();
+  const utcHour = device.utcScanHour ?? device.scanHour ?? 18;
+  const utcMinute = device.utcScanMinute ?? device.scanMinute ?? 0;
+
+  const day = now.getUTCDay();
   if (!device.scanWeekends && (day === 0 || day === 6)) { console.log(`[${deviceId}] checkMissedScan: weekend skipped`); return; }
 
-  const scanHour = device.scanHour ?? 18;
-  const scanMinute = device.scanMinute ?? 0;
+  // Build today's scheduled time in UTC
+  const scheduledToday = new Date(now);
+  scheduledToday.setUTCHours(utcHour, utcMinute, 0, 0);
 
-  // Build today's scheduled time in ET
-  const scheduledToday = new Date(etNow);
-  scheduledToday.setHours(scanHour, scanMinute, 0, 0);
-
-  console.log(`[${deviceId}] checkMissedScan: etNow=${etNow.toTimeString().slice(0,8)} scheduled=${String(scanHour).padStart(2,'0')}:${String(scanMinute).padStart(2,'0')} lastScanAt=${device.lastScanAt ? new Date(device.lastScanAt).toTimeString().slice(0,8) : 'null'} lastStartedAt=${device.lastScanStartedAt ? new Date(device.lastScanStartedAt).toTimeString().slice(0,8) : 'null'}`);
+  console.log(`[${deviceId}] checkMissedScan: utcNow=${now.toUTCString().slice(17,25)} scheduled=${String(utcHour).padStart(2,'0')}:${String(utcMinute).padStart(2,'0')} lastScanAt=${device.lastScanAt ? new Date(device.lastScanAt).toUTCString().slice(17,25) : 'null'} lastStartedAt=${device.lastScanStartedAt ? new Date(device.lastScanStartedAt).toUTCString().slice(17,25) : 'null'}`);
 
   // Not yet time
-  if (etNow < scheduledToday) { console.log(`[${deviceId}] checkMissedScan: not yet time`); return; }
+  if (now < scheduledToday) { console.log(`[${deviceId}] checkMissedScan: not yet time`); return; }
 
   // Only catch up within a 4-hour window — don't run yesterday's missed scan
-  const msLate = etNow - scheduledToday;
+  const msLate = now - scheduledToday;
   if (msLate > 4 * 60 * 60 * 1000) { console.log(`[${deviceId}] checkMissedScan: too late (${Math.round(msLate/3600000)}h)`); return; }
 
   // Already started today at or after scheduled time
   const lastStarted = device.lastScanStartedAt ?? device.lastScanAt;
-  if (lastStarted) {
-    const lastET = new Date(new Date(lastStarted).toLocaleString('en-US', { timeZone: 'America/New_York' }));
-    if (lastET >= scheduledToday) { console.log(`[${deviceId}] checkMissedScan: already ran today at ${lastET.toTimeString().slice(0,8)}`); return; }
+  if (lastStarted && new Date(lastStarted) >= scheduledToday) {
+    console.log(`[${deviceId}] checkMissedScan: already ran today`); return;
   }
 
   console.log(`[${deviceId}] Missed scheduled scan at ${String(scanHour).padStart(2,'0')}:${String(scanMinute).padStart(2,'0')} ET — starting now (${Math.round(msLate/60000)} min late)`);
@@ -237,7 +236,9 @@ function scheduleDevice(deviceId) {
   }
 
   const scanWeekends = device.scanWeekends ?? false;
-  const cronExpr = `${minute} ${hour} * * ${scanWeekends ? '*' : '1-5'}`;
+  const utcHour = device.utcScanHour ?? hour;
+  const utcMinute = device.utcScanMinute ?? minute;
+  const cronExpr = `${utcMinute} ${utcHour} * * ${scanWeekends ? '*' : '1-5'}`;
   scheduledJobs[deviceId] = cron.schedule(cronExpr, () => scanForDevice(deviceId), {
     timezone: 'America/New_York', // US market time
   });
@@ -270,7 +271,7 @@ try { saveStore(store); } catch (_) {}
 // Phone registers itself + sends config
 app.post('/register', (req, res) => {
   try {
-    const { deviceId, pushToken, apiKey, criteria, matchMode, minChangePct, minScore, minMarketCap, scanHour, scanMinute, scanWeekends, universe, criteriaWeights } = req.body;
+    const { deviceId, pushToken, apiKey, criteria, matchMode, minChangePct, minScore, minMarketCap, scanHour, scanMinute, utcScanHour, utcScanMinute, scanWeekends, universe, criteriaWeights } = req.body;
     if (!deviceId || !pushToken || !apiKey) return res.status(400).json({ error: 'deviceId, pushToken and apiKey required' });
 
     const existing = store[deviceId] ?? {};
@@ -296,6 +297,8 @@ app.post('/register', (req, res) => {
       scanMinute: scanMinute ?? existing.scanMinute ?? 0,
       universe: parsedUniverse,
       scanWeekends: scanWeekends ?? existing.scanWeekends ?? false,
+      utcScanHour: utcScanHour ?? existing.utcScanHour ?? scanHour ?? 18,
+      utcScanMinute: utcScanMinute ?? existing.utcScanMinute ?? scanMinute ?? 0,
       criteriaWeights: criteriaWeights ?? existing.criteriaWeights ?? null,
     };
 
