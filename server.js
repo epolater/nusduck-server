@@ -220,7 +220,7 @@ function checkMissedScan(deviceId) {
     console.log(`[${deviceId}] checkMissedScan: already ran today`); return;
   }
 
-  console.log(`[${deviceId}] Missed scheduled scan at ${String(scanHour).padStart(2,'0')}:${String(scanMinute).padStart(2,'0')} ET — starting now (${Math.round(msLate/60000)} min late)`);
+  console.log(`[${deviceId}] Missed scheduled scan at ${String(utcHour).padStart(2,'0')}:${String(utcMinute).padStart(2,'0')} UTC — starting now (${Math.round(msLate/60000)} min late)`);
   scanForDevice(deviceId).catch(console.error);
 }
 
