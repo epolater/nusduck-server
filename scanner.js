@@ -13,7 +13,9 @@ const CRITERIA_WEIGHTS = {
   put_call_ratio_low: 3, put_call_ratio_high: 3, high_iv: 2, near_max_pain: 2,
 };
 
-async function runScan({ universe, criteria, matchMode, minChangePct, minScore, minMarketCap, apiKey, onProgress, shouldStop, fromIndex = 0, existingSignals = [] }) {
+async function runScan({ universe, criteria, matchMode, minChangePct, minScore, minMarketCap, criteriaWeights, apiKey, onProgress, shouldStop, fromIndex = 0, existingSignals = [] }) {
+  // Merge server defaults with any user-supplied weight overrides
+  const weights = criteriaWeights ? { ...CRITERIA_WEIGHTS, ...criteriaWeights } : CRITERIA_WEIGHTS;
   const buyCriteria = criteria.filter(c => c.enabled && c.signal === 'buy');
   const regularBuyCriteria = buyCriteria;
   const marketCapFilterEnabled = minMarketCap > 0;
@@ -87,7 +89,7 @@ async function runScan({ universe, criteria, matchMode, minChangePct, minScore, 
     const matchedCriteria = matchedBuy.map(r => `${r.c.name}: ${r.result.detail}`);
 
     let score = Math.round(matchedBuy.reduce((sum, r) => {
-      const baseWeight = CRITERIA_WEIGHTS[r.c.id] ?? 1;
+      const baseWeight = weights[r.c.id] ?? 1;
       if ((r.c.id === 'trending_up' || r.c.id === 'trending_down') && r.result?.value != null) {
         const absPct = Math.abs(r.result.value);
         const dynamicWeight = Math.max(baseWeight, absPct / 2);
@@ -119,7 +121,7 @@ async function runScan({ universe, criteria, matchMode, minChangePct, minScore, 
           matched = Math.abs(currentPrice - optionsData.maxPain) / optionsData.maxPain < 0.03;
           detail = `MaxPain: $${optionsData.maxPain.toFixed(2)}`;
         }
-        if (matched) { matchedCriteria.push(`${c.name}: ${detail}`); score += CRITERIA_WEIGHTS[c.id] ?? 1; }
+        if (matched) { matchedCriteria.push(`${c.name}: ${detail}`); score += weights[c.id] ?? 1; }
       }
     } catch (_) {}
 

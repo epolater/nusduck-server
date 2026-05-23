@@ -90,6 +90,7 @@ async function scanForDevice(deviceId, fromIndex = 0, existingSignals = []) {
       minChangePct: device.minChangePct ?? 1,
       minScore: device.minScore ?? 1,
       minMarketCap: device.minMarketCap ?? 0,
+      criteriaWeights: device.criteriaWeights ?? null,
       apiKey: device.apiKey,
       fromIndex,
       existingSignals,
@@ -107,6 +108,14 @@ async function scanForDevice(deviceId, fromIndex = 0, existingSignals = []) {
         };
         if (current % 50 === 0) {
           console.log(`[${deviceId}] Progress: ${current}/${total} (${partialSignals?.length ?? 0} signals)`);
+        }
+        // Checkpoint: persist partial signals every 100 stocks so a server restart doesn't lose progress
+        if (current % 100 === 0 && partialSignals?.length > 0) {
+          device.crashResumeIndex = current;
+          device.crashResumeSignals = partialSignals;
+          device.crashResumeTotal = total;
+          store[deviceId] = device;
+          try { saveStore(store); } catch (_) {}
         }
       },
     });
@@ -129,9 +138,12 @@ async function scanForDevice(deviceId, fromIndex = 0, existingSignals = []) {
     return;
   }
 
-  // Scan completed — clear resume state
+  // Scan completed — clear resume state and crash checkpoints
   device.resumeIndex = null;
   device.resumeSignals = [];
+  device.crashResumeIndex = null;
+  device.crashResumeSignals = [];
+  device.crashResumeTotal = null;
 
   device.lastScanAt = Date.now();
   device.lastSignals = signals;
@@ -181,14 +193,31 @@ function scheduleDevice(deviceId) {
 }
 
 // Reschedule all devices on startup
-Object.keys(store).forEach(scheduleDevice);
+// Also promote any crash checkpoints to resumable state so the app can continue
+Object.keys(store).forEach(deviceId => {
+  const device = store[deviceId];
+  if (device?.crashResumeIndex > 0 && device?.crashResumeSignals?.length > 0) {
+    // Server crashed mid-scan — restore as a stoppable resume point
+    if (!device.resumeIndex || device.crashResumeIndex > device.resumeIndex) {
+      device.resumeIndex = device.crashResumeIndex;
+      device.resumeSignals = device.crashResumeSignals;
+      console.log(`[${deviceId}] Crash recovery: restoring resume point at ${device.crashResumeIndex}/${device.crashResumeTotal} (${device.crashResumeSignals.length} signals)`);
+    }
+    device.crashResumeIndex = null;
+    device.crashResumeSignals = [];
+    device.crashResumeTotal = null;
+    store[deviceId] = device;
+  }
+  scheduleDevice(deviceId);
+});
+try { saveStore(store); } catch (_) {}
 
 // ── API routes ─────────────────────────────────────────────────────
 
 // Phone registers itself + sends config
 app.post('/register', (req, res) => {
   try {
-    const { deviceId, pushToken, apiKey, criteria, matchMode, minChangePct, minScore, minMarketCap, scanHour, scanMinute, universe } = req.body;
+    const { deviceId, pushToken, apiKey, criteria, matchMode, minChangePct, minScore, minMarketCap, scanHour, scanMinute, universe, criteriaWeights } = req.body;
     if (!deviceId || !pushToken || !apiKey) return res.status(400).json({ error: 'deviceId, pushToken and apiKey required' });
 
     const existing = store[deviceId] ?? {};
@@ -213,6 +242,7 @@ app.post('/register', (req, res) => {
       scanHour: scanHour ?? existing.scanHour ?? 18,
       scanMinute: scanMinute ?? existing.scanMinute ?? 0,
       universe: parsedUniverse,
+      criteriaWeights: criteriaWeights ?? existing.criteriaWeights ?? null,
     };
 
     try {
@@ -262,10 +292,12 @@ app.get('/status/:deviceId', (req, res) => {
   const device = store[deviceId];
   if (!device) return res.status(404).json({ error: 'Device not registered' });
   const p = scanProgress[deviceId] ?? { scanning: false, phase: 'idle', progress: 0, total: 0, evaluated: 0, noData: 0, filtered: 0, signals: [] };
+  // lastSignals: prefer completed scan results; fall back to resume signals so app shows something after a crash
+  const lastSignals = p.scanning ? [] : (device.lastSignals?.length > 0 ? device.lastSignals : (device.resumeSignals ?? []));
   res.json({
     ...p,
     lastScanAt: device.lastScanAt ?? null,
-    lastSignals: p.scanning ? [] : (device.lastSignals ?? []),
+    lastSignals,
     resumeIndex: device.resumeIndex ?? null,
     universeTotal: device.universe?.stocks?.length ?? 0,
   });
