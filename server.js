@@ -72,6 +72,15 @@ async function scanForDevice(deviceId, fromIndex = 0, existingSignals = []) {
 
   scanProgress[deviceId].phase = 'loading_universe';
   const universe = await ensureUniverse(deviceId);
+
+  if (universe.length) {
+    await sendPushNotification(device.pushToken, {
+      title: '🔍 Nasduck — Scan started',
+      body: `Scanning ${universe.length} stocks. You'll be notified when done.`,
+      data: {},
+    });
+  }
+
   if (!universe.length) {
     await sendPushNotification(device.pushToken, {
       title: '⚠️ Nasduck — Scan failed',
