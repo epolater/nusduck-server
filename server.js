@@ -70,6 +70,11 @@ async function scanForDevice(deviceId, fromIndex = 0, existingSignals = []) {
   stopFlags[deviceId] = false;
   scanProgress[deviceId] = { scanning: true, progress: fromIndex, total: 0, evaluated: 0, noData: 0, filtered: 0, signals: [...existingSignals], phase: fromIndex > 0 ? 'scanning' : 'starting' };
 
+  // Record scan start time so checkMissedScan uses start (not completion) for dedup
+  device.lastScanStartedAt = Date.now();
+  store[deviceId] = device;
+  try { saveStore(store); } catch (_) {}
+
   scanProgress[deviceId].phase = 'loading_universe';
   const universe = await ensureUniverse(deviceId);
 
@@ -208,9 +213,10 @@ function checkMissedScan(deviceId) {
   const msLate = etNow - scheduledToday;
   if (msLate > 4 * 60 * 60 * 1000) return;
 
-  // Already ran today at or after scheduled time
-  if (device.lastScanAt) {
-    const lastET = new Date(new Date(device.lastScanAt).toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  // Already started today at or after scheduled time
+  const lastStarted = device.lastScanStartedAt ?? device.lastScanAt;
+  if (lastStarted) {
+    const lastET = new Date(new Date(lastStarted).toLocaleString('en-US', { timeZone: 'America/New_York' }));
     if (lastET >= scheduledToday) return;
   }
 
