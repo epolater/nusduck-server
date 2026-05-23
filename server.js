@@ -182,6 +182,42 @@ async function scanForDevice(deviceId, fromIndex = 0, existingSignals = []) {
 // ── Scheduled scans ────────────────────────────────────────────────
 const scheduledJobs = {};
 
+// Check if a scheduled scan was missed (server was asleep) and start it now.
+// Called on /status and /register so the first request after wakeup catches up.
+function checkMissedScan(deviceId) {
+  const device = store[deviceId];
+  if (!device?.apiKey || !device?.pushToken) return;
+  if (scanProgress[deviceId]?.scanning) return;
+
+  // Only weekdays in ET
+  const etNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const day = etNow.getDay();
+  if (day === 0 || day === 6) return;
+
+  const scanHour = device.scanHour ?? 18;
+  const scanMinute = device.scanMinute ?? 0;
+
+  // Build today's scheduled time in ET
+  const scheduledToday = new Date(etNow);
+  scheduledToday.setHours(scanHour, scanMinute, 0, 0);
+
+  // Not yet time
+  if (etNow < scheduledToday) return;
+
+  // Only catch up within a 4-hour window — don't run yesterday's missed scan
+  const msLate = etNow - scheduledToday;
+  if (msLate > 4 * 60 * 60 * 1000) return;
+
+  // Already ran today at or after scheduled time
+  if (device.lastScanAt) {
+    const lastET = new Date(new Date(device.lastScanAt).toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    if (lastET >= scheduledToday) return;
+  }
+
+  console.log(`[${deviceId}] Missed scheduled scan at ${String(scanHour).padStart(2,'0')}:${String(scanMinute).padStart(2,'0')} ET — starting now (${Math.round(msLate/60000)} min late)`);
+  scanForDevice(deviceId).catch(console.error);
+}
+
 function scheduleDevice(deviceId) {
   const device = store[deviceId];
   if (!device) return;
@@ -264,6 +300,8 @@ app.post('/register', (req, res) => {
     scheduleDevice(deviceId);
     console.log(`[${deviceId}] Registered / updated config`);
     res.json({ ok: true, message: `Scan scheduled at ${store[deviceId].scanHour}:${String(store[deviceId].scanMinute).padStart(2,'0')} ET` });
+    // Check if today's scan was missed while server was asleep
+    setTimeout(() => checkMissedScan(deviceId), 2000);
   } catch (e) {
     console.error('Register error:', e.message, e.stack);
     res.status(500).json({ error: e.message });
@@ -310,6 +348,8 @@ app.get('/status/:deviceId', (req, res) => {
     resumeIndex: device.resumeIndex ?? null,
     universeTotal: device.universe?.stocks?.length ?? 0,
   });
+  // Wake-up check: start missed scan if server was asleep at scheduled time
+  if (!p.scanning) setTimeout(() => checkMissedScan(deviceId), 1000);
 });
 
 // Health check
