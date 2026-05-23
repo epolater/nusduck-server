@@ -268,6 +268,9 @@ try { saveStore(store); } catch (_) {}
 
 // ── API routes ─────────────────────────────────────────────────────
 
+// Keep-alive ping — hit this every 10 min from cron-job.org to prevent Render sleep
+app.get('/health', (req, res) => res.json({ ok: true, devices: Object.keys(store).length, ts: Date.now() }));
+
 // Phone registers itself + sends config
 app.post('/register', (req, res) => {
   try {
