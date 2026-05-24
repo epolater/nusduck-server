@@ -2,6 +2,7 @@ const express = require('express');
 const cron = require('node-cron');
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
 const { fetchNasdaqSymbols } = require('./finnhub');
 const { runScan } = require('./scanner');
 const { sendPushNotification } = require('./push');
@@ -56,6 +57,28 @@ async function ensureUniverse(deviceId) {
 const stopFlags = {};    // deviceId → true when stop requested
 const scanProgress = {}; // deviceId → { scanning, progress, total, evaluated, noData, filtered, signals }
 
+// ── Self-ping to keep Render free tier alive during long scans ─────
+let selfPingInterval = null;
+
+function startSelfPing() {
+  if (selfPingInterval) return;
+  console.log('[SelfPing] Starting self-ping every 10 min to keep server alive');
+  selfPingInterval = setInterval(() => {
+    const port = process.env.PORT || 10000;
+    http.get(`http://localhost:${port}/health`, (res) => {
+      console.log(`[SelfPing] Pinged self — status: ${res.statusCode}`);
+    }).on('error', (e) => console.log(`[SelfPing] Error: ${e.message}`));
+  }, 10 * 60 * 1000);
+}
+
+function stopSelfPing() {
+  if (selfPingInterval) {
+    clearInterval(selfPingInterval);
+    selfPingInterval = null;
+    console.log('[SelfPing] Stopped self-ping');
+  }
+}
+
 // ── Scan logic ─────────────────────────────────────────────────────
 async function scanForDevice(deviceId, fromIndex = 0, existingSignals = []) {
   const device = store[deviceId];
@@ -69,6 +92,7 @@ async function scanForDevice(deviceId, fromIndex = 0, existingSignals = []) {
   console.log(`[${deviceId}] Starting scan...`);
   stopFlags[deviceId] = false;
   scanProgress[deviceId] = { scanning: true, progress: fromIndex, total: 0, evaluated: 0, noData: 0, filtered: 0, signals: [...existingSignals], phase: fromIndex > 0 ? 'scanning' : 'starting' };
+  startSelfPing(); // keep Render alive during long scan
 
   // Record scan start time so checkMissedScan uses start (not completion) for dedup
   device.lastScanStartedAt = Date.now();
@@ -137,6 +161,7 @@ async function scanForDevice(deviceId, fromIndex = 0, existingSignals = []) {
     });
   } finally {
     if (scanProgress[deviceId]) scanProgress[deviceId].scanning = false;
+    stopSelfPing(); // scan done, no need to keep server alive
   }
 
   const wasStopped = stopFlags[deviceId];
