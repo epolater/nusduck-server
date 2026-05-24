@@ -79,11 +79,13 @@ async function scanForDevice(deviceId, fromIndex = 0, existingSignals = []) {
   const universe = await ensureUniverse(deviceId);
 
   if (universe.length) {
+    console.log(`[${deviceId}] Sending scan started push to ${device.pushToken}`);
     await sendPushNotification(device.pushToken, {
       title: '🔍 Nasduck — Scan started',
       body: `Scanning ${universe.length} stocks. You'll be notified when done.`,
       data: {},
     });
+    console.log(`[${deviceId}] Scan started push sent`);
   }
 
   if (!universe.length) {
