@@ -239,11 +239,9 @@ function scheduleDevice(deviceId) {
   const utcHour = device.utcScanHour ?? hour;
   const utcMinute = device.utcScanMinute ?? minute;
   const cronExpr = `${utcMinute} ${utcHour} * * ${scanWeekends ? '*' : '1-5'}`;
-  scheduledJobs[deviceId] = cron.schedule(cronExpr, () => scanForDevice(deviceId), {
-    timezone: 'America/New_York', // US market time
-  });
+  scheduledJobs[deviceId] = cron.schedule(cronExpr, () => scanForDevice(deviceId));  // no timezone — cron runs in UTC (Render server is UTC)
 
-  console.log(`[${deviceId}] Scheduled scan at ${String(hour).padStart(2,'0')}:${String(minute).padStart(2,'0')} ET weekdays`);
+  console.log(`[${deviceId}] Scheduled scan at ${String(hour).padStart(2,'0')}:${String(minute).padStart(2,'0')} local (UTC ${String(utcHour).padStart(2,'0')}:${String(utcMinute).padStart(2,'0')}) ${scanWeekends ? 'every day' : 'weekdays only'}`);
 }
 
 // Reschedule all devices on startup
