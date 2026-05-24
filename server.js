@@ -68,7 +68,7 @@ function startSelfPing() {
     http.get(`http://localhost:${port}/health`, (res) => {
       console.log(`[SelfPing] Pinged self — status: ${res.statusCode}`);
     }).on('error', (e) => console.log(`[SelfPing] Error: ${e.message}`));
-  }, 10 * 60 * 1000);
+  }, 60 * 1000); // every 1 minute
 }
 
 function stopSelfPing() {
