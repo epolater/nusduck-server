@@ -258,13 +258,20 @@ function scheduleDevice(deviceId) {
   const device = store[deviceId];
   if (!device) return;
 
-  const hour = device.scanHour ?? 18;
-  const minute = device.scanMinute ?? 0;
-
+  // Tear down any prior schedule first
   if (scheduledJobs[deviceId]) {
     scheduledJobs[deviceId].stop();
+    delete scheduledJobs[deviceId];
   }
 
+  // Daily auto-scan disabled — skip scheduling entirely
+  if (device.dailyScanEnabled === false) {
+    console.log(`[${deviceId}] Daily auto-scan disabled — not scheduling`);
+    return;
+  }
+
+  const hour = device.scanHour ?? 18;
+  const minute = device.scanMinute ?? 0;
   const scanWeekends = device.scanWeekends ?? false;
   const utcHour = device.utcScanHour ?? hour;
   const utcMinute = device.utcScanMinute ?? minute;
@@ -302,7 +309,7 @@ app.get('/health', (req, res) => res.json({ ok: true, devices: Object.keys(store
 // Phone registers itself + sends config
 app.post('/register', (req, res) => {
   try {
-    const { deviceId, pushToken, criteria, matchMode, minChangePct, minScore, minMarketCap, scanHour, scanMinute, utcScanHour, utcScanMinute, scanWeekends, universe, criteriaWeights } = req.body;
+    const { deviceId, pushToken, dailyScanEnabled, criteria, matchMode, minChangePct, minScore, minMarketCap, scanHour, scanMinute, utcScanHour, utcScanMinute, scanWeekends, universe, criteriaWeights } = req.body;
     if (!deviceId || !pushToken) return res.status(400).json({ error: 'deviceId and pushToken required' });
 
     const existing = store[deviceId] ?? {};
@@ -318,6 +325,7 @@ app.post('/register', (req, res) => {
     store[deviceId] = {
       ...existing,
       pushToken,
+      dailyScanEnabled: dailyScanEnabled ?? existing.dailyScanEnabled ?? true,
       criteria: criteria ?? existing.criteria ?? [],
       matchMode: matchMode ?? existing.matchMode ?? 'any',
       minChangePct: minChangePct ?? existing.minChangePct ?? 1,
