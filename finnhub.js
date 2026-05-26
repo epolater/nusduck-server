@@ -55,7 +55,16 @@ async function fetchNasdaqSymbols(tier = 10) {
   const rows = res.data?.data?.table?.rows ?? [];
   return rows
     .filter(r => r.symbol && /^[A-Z]{1,5}$/.test(r.symbol))
-    .map(r => ({ symbol: r.symbol, name: r.name ?? r.symbol }));
+    .map(r => {
+      // marketCap from screener is a comma-separated string in dollars (e.g. "5,199,612,000,000")
+      const raw = r.marketCap;
+      const cap = typeof raw === 'string' ? Number(raw.replace(/[$,]/g, '')) : null;
+      return {
+        symbol: r.symbol,
+        name: r.name ?? r.symbol,
+        marketCap: cap && cap > 0 ? cap : null,
+      };
+    });
 }
 
 module.exports = { fetchCandles, fetchMarketCap, fetchNasdaqSymbols, delay, RATE_LIMIT_MS };

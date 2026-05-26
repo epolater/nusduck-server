@@ -33,10 +33,10 @@ async function runScan({ universe, criteria, matchMode, minChangePct, minScore, 
 
     if (onProgress) onProgress({ current: i + 1, total: universe.length, evaluated, noData, filtered, found: signals.length, partialSignals: signals });
 
-    const [candles, marketCap] = await Promise.all([
-      fetchCandles(stock.symbol),
-      marketCapFilterEnabled ? fetchMarketCap(stock.symbol) : Promise.resolve(null),
-    ]);
+    // Yahoo chart endpoint doesn't expose marketCap — use the value the client cached
+    // on the universe entry (from NASDAQ screener at build time).
+    const candles = await fetchCandles(stock.symbol);
+    const marketCap = stock.marketCap ?? candles?.marketCap ?? null;
 
     if (!candles || candles.close.length < 20) {
       noData++;
@@ -50,10 +50,11 @@ async function runScan({ universe, criteria, matchMode, minChangePct, minScore, 
       continue;
     }
 
-    // Hard filter: market cap
-    if (marketCapFilterEnabled) {
+    // Hard filter: market cap. Skip the check when we don't have a cap value
+    // (universe tier already provides a coarse floor).
+    if (marketCapFilterEnabled && marketCap != null) {
       const minCap = minMarketCap * 1_000_000_000;
-      if (!marketCap || marketCap < minCap) {
+      if (marketCap < minCap) {
         filtered++;
         await delay(RATE_LIMIT_MS);
         continue;
