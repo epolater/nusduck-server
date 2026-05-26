@@ -2,7 +2,7 @@ const express = require('express');
 const cron = require('node-cron');
 const fs = require('fs');
 const path = require('path');
-const http = require('http');
+const https = require('https');
 const { fetchNasdaqSymbols } = require('./finnhub');
 const { runScan } = require('./scanner');
 const { sendPushNotification } = require('./push');
@@ -25,23 +25,23 @@ function saveStore(data) {
 }
 
 let store = loadStore();
-// store shape: { [deviceId]: { pushToken, apiKey, criteria, matchMode, minChangePct, minScore, scanHour, scanMinute, universe, lastScanAt } }
+// store shape: { [deviceId]: { pushToken, criteria, matchMode, minChangePct, minScore, scanHour, scanMinute, universe, lastScanAt } }
 
 // ── Universe cache ─────────────────────────────────────────────────
 async function ensureUniverse(deviceId) {
   const device = store[deviceId];
-  if (!device?.apiKey) return [];
+  if (!device) return [];
 
-  // Use locally-provided universe if available (sent from app on registration)
+  // Use app-provided universe if available (sent on registration)
   if (device.universe?.stocks?.length > 0) {
     console.log(`[${deviceId}] Using app-provided universe: ${device.universe.stocks.length} stocks`);
     return device.universe.stocks;
   }
 
-  // Fallback: fetch from Finnhub if app didn't send universe
-  console.log(`[${deviceId}] No universe from app, fetching from Finnhub...`);
+  // Fallback: fetch from NASDAQ screener
+  console.log(`[${deviceId}] No universe from app, fetching from NASDAQ screener...`);
   try {
-    const stocks = await fetchNasdaqSymbols(device.apiKey);
+    const stocks = await fetchNasdaqSymbols(10); // default >$10B tier
     device.universe = { stocks, updatedAt: Date.now() };
     store[deviceId] = device;
     saveStore(store);
@@ -63,9 +63,13 @@ let selfPingInterval = null;
 function startSelfPing() {
   if (selfPingInterval) return;
   console.log('[SelfPing] Starting self-ping every 10 min to keep server alive');
+  const publicUrl = process.env.RENDER_EXTERNAL_URL;
+  if (!publicUrl) {
+    console.log('[SelfPing] No RENDER_EXTERNAL_URL, self-ping skipped');
+    return;
+  }
   selfPingInterval = setInterval(() => {
-    const port = process.env.PORT || 10000;
-    http.get(`http://localhost:${port}/health`, (res) => {
+    https.get(`${publicUrl}/health`, (res) => {
       console.log(`[SelfPing] Pinged self — status: ${res.statusCode}`);
     }).on('error', (e) => console.log(`[SelfPing] Error: ${e.message}`));
   }, 60 * 1000); // every 1 minute
@@ -82,7 +86,7 @@ function stopSelfPing() {
 // ── Scan logic ─────────────────────────────────────────────────────
 async function scanForDevice(deviceId, fromIndex = 0, existingSignals = []) {
   const device = store[deviceId];
-  if (!device?.pushToken || !device?.apiKey) return;
+  if (!device?.pushToken) return;
 
   if (scanProgress[deviceId]?.scanning) {
     console.log(`[${deviceId}] Scan already running, skipping.`);
@@ -131,7 +135,6 @@ async function scanForDevice(deviceId, fromIndex = 0, existingSignals = []) {
       minScore: device.minScore ?? 1,
       minMarketCap: device.minMarketCap ?? 0,
       criteriaWeights: device.criteriaWeights ?? null,
-      apiKey: device.apiKey,
       fromIndex,
       existingSignals,
       shouldStop: () => !!stopFlags[deviceId],
@@ -218,7 +221,7 @@ const scheduledJobs = {};
 // Called on /status and /register so the first request after wakeup catches up.
 function checkMissedScan(deviceId) {
   const device = store[deviceId];
-  if (!device?.apiKey || !device?.pushToken) { console.log(`[${deviceId}] checkMissedScan: no apiKey/pushToken`); return; }
+  if (!device?.pushToken) { console.log(`[${deviceId}] checkMissedScan: no pushToken`); return; }
   if (scanProgress[deviceId]?.scanning) { console.log(`[${deviceId}] checkMissedScan: already scanning`); return; }
 
   const now = new Date();
@@ -299,8 +302,8 @@ app.get('/health', (req, res) => res.json({ ok: true, devices: Object.keys(store
 // Phone registers itself + sends config
 app.post('/register', (req, res) => {
   try {
-    const { deviceId, pushToken, apiKey, criteria, matchMode, minChangePct, minScore, minMarketCap, scanHour, scanMinute, utcScanHour, utcScanMinute, scanWeekends, universe, criteriaWeights } = req.body;
-    if (!deviceId || !pushToken || !apiKey) return res.status(400).json({ error: 'deviceId, pushToken and apiKey required' });
+    const { deviceId, pushToken, criteria, matchMode, minChangePct, minScore, minMarketCap, scanHour, scanMinute, utcScanHour, utcScanMinute, scanWeekends, universe, criteriaWeights } = req.body;
+    if (!deviceId || !pushToken) return res.status(400).json({ error: 'deviceId and pushToken required' });
 
     const existing = store[deviceId] ?? {};
 
@@ -315,7 +318,6 @@ app.post('/register', (req, res) => {
     store[deviceId] = {
       ...existing,
       pushToken,
-      apiKey,
       criteria: criteria ?? existing.criteria ?? [],
       matchMode: matchMode ?? existing.matchMode ?? 'any',
       minChangePct: minChangePct ?? existing.minChangePct ?? 1,

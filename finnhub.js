@@ -6,7 +6,7 @@ function delay(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-async function fetchCandles(symbol, apiKey) {
+async function fetchCandles(symbol) {
   const to = Math.floor(Date.now() / 1000);
   const from = to - 86400 * 260;
   try {
@@ -25,22 +25,37 @@ async function fetchCandles(symbol, apiKey) {
   }
 }
 
-async function fetchMarketCap(symbol, apiKey) {
+// Market cap comes from Yahoo Finance chart meta (same request as candles — no extra call needed)
+async function fetchMarketCap(symbol) {
   try {
-    await delay(RATE_LIMIT_MS);
-    const res = await axios.get(`https://finnhub.io/api/v1/stock/profile2?symbol=${symbol}&token=${apiKey}`, { timeout: 8000 });
-    const cap = res.data?.marketCapitalization;
-    return cap ? cap * 1_000_000 : null;
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=5d`;
+    const res = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 8000 });
+    const m = res.data?.chart?.result?.[0]?.meta;
+    return m?.regularMarketCap ?? m?.marketCap ?? null;
   } catch {
     return null;
   }
 }
 
-async function fetchNasdaqSymbols(apiKey) {
-  const res = await axios.get(`https://finnhub.io/api/v1/stock/symbol?exchange=US&token=${apiKey}`, { timeout: 30000 });
-  return res.data
-    .filter(s => s.type === 'Common Stock' && /^[A-Z]{1,4}$/.test(s.symbol))
-    .map(s => ({ symbol: s.symbol, name: s.description }));
+// NASDAQ screener — same tiers as the app
+async function fetchNasdaqSymbols(tier = 10) {
+  const tierMap = {
+    0:   [],
+    0.3: ['small', 'mid', 'large', 'mega'],
+    2:   ['mid', 'large', 'mega'],
+    10:  ['large', 'mega'],
+    200: ['mega'],
+  };
+  const tiers = tierMap[tier] ?? ['large', 'mega'];
+  const marketcapParam = tiers.length > 0 ? `&marketcap=${tiers.join('%7C')}` : '';
+  const res = await axios.get(
+    `https://api.nasdaq.com/api/screener/stocks?tableonly=true&limit=9999&exchange=NASDAQ${marketcapParam}`,
+    { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 30000 }
+  );
+  const rows = res.data?.data?.table?.rows ?? [];
+  return rows
+    .filter(r => r.symbol && /^[A-Z]{1,5}$/.test(r.symbol))
+    .map(r => ({ symbol: r.symbol, name: r.name ?? r.symbol }));
 }
 
 module.exports = { fetchCandles, fetchMarketCap, fetchNasdaqSymbols, delay, RATE_LIMIT_MS };

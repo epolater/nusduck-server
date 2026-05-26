@@ -13,7 +13,7 @@ const CRITERIA_WEIGHTS = {
   put_call_ratio_low: 3, put_call_ratio_high: 3, high_iv: 2, near_max_pain: 2,
 };
 
-async function runScan({ universe, criteria, matchMode, minChangePct, minScore, minMarketCap, criteriaWeights, apiKey, onProgress, shouldStop, fromIndex = 0, existingSignals = [] }) {
+async function runScan({ universe, criteria, matchMode, minChangePct, minScore, minMarketCap, criteriaWeights, onProgress, shouldStop, fromIndex = 0, existingSignals = [] }) {
   // Merge server defaults with any user-supplied weight overrides
   const weights = criteriaWeights ? { ...CRITERIA_WEIGHTS, ...criteriaWeights } : CRITERIA_WEIGHTS;
   const buyCriteria = criteria.filter(c => c.enabled && c.signal === 'buy');
@@ -34,8 +34,8 @@ async function runScan({ universe, criteria, matchMode, minChangePct, minScore, 
     if (onProgress) onProgress({ current: i + 1, total: universe.length, evaluated, noData, filtered, found: signals.length, partialSignals: signals });
 
     const [candles, marketCap] = await Promise.all([
-      fetchCandles(stock.symbol, apiKey),
-      marketCapFilterEnabled ? fetchMarketCap(stock.symbol, apiKey) : Promise.resolve(null),
+      fetchCandles(stock.symbol),
+      marketCapFilterEnabled ? fetchMarketCap(stock.symbol) : Promise.resolve(null),
     ]);
 
     if (!candles || candles.close.length < 20) {
